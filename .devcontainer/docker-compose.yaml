@@ -1,0 +1,16 @@
+networks:
+  ohshift:
+
+services:
+  devcontainer:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    command: sleep infinity
+    env_file:
+      - .env
+      # - .env.secret
+    volumes:
+      - ..:/workspace:cached
+    networks:
+      - ohshift
