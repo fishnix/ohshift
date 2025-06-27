@@ -9,6 +9,7 @@ import (
 
 // Config holds all configuration for the OhShift bot
 type Config struct {
+	DBURI                string
 	SlackBotToken        string
 	SlackSigningSecret   string
 	SlackAppToken        string
@@ -21,10 +22,11 @@ type Config struct {
 // Load loads configuration from environment variables
 func Load() *Config {
 	config := &Config{
+		DBURI:                getEnv("DB_URI", ""),
 		SlackBotToken:        getEnv("SLACK_BOT_TOKEN", ""),
 		SlackSigningSecret:   getEnv("SLACK_SIGNING_SECRET", ""),
 		SlackAppToken:        getEnv("SLACK_APP_TOKEN", ""),
-		SlashCommand:         getEnv("SLASH_COMMAND", "/ohshift"),
+		SlashCommand:         getEnv("SLASH_COMMAND", "/shift"),
 		NotificationsChannel: getEnv("NOTIFICATIONS_CHANNEL", "general"),
 		Port:                 getEnv("PORT", "8080"),
 		LogLevel:             parseLogLevel(getEnv("LOG_LEVEL", "info")),

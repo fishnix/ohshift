@@ -13,44 +13,44 @@ func TestParseCommand(t *testing.T) {
 		wantErr bool
 	}{
 		{
-			name: "valid SEV1 command",
-			text: "start SEV1 incident the website is down",
+			name: "valid SEV0 command",
+			text: "start SEV0 incident the website is down",
 			want: &Command{
 				Action:      "start",
-				Severity:    Severity1,
+				Severity:    Severity0,
 				Title:       "the website is down",
 				Description: "",
 			},
 			wantErr: false,
 		},
 		{
-			name: "valid SEV2 command with long title",
-			text: "start SEV2 incident database connection issues causing slow response times",
+			name: "valid SEV1 command with long title",
+			text: "start SEV1 incident database connection issues causing slow response times",
 			want: &Command{
 				Action:      "start",
-				Severity:    Severity2,
+				Severity:    Severity1,
 				Title:       "database connection issues causing slow response times",
 				Description: "",
 			},
 			wantErr: false,
 		},
 		{
-			name: "valid SEV1 command with description",
-			text: "start SEV1 incident the website is down -- Users cannot access the main application, 500 errors",
+			name: "valid SEV0 command with description",
+			text: "start SEV0 incident the website is down -- Users cannot access the main application, 500 errors",
 			want: &Command{
 				Action:      "start",
-				Severity:    Severity1,
+				Severity:    Severity0,
 				Title:       "the website is down",
 				Description: "Users cannot access the main application, 500 errors",
 			},
 			wantErr: false,
 		},
 		{
-			name: "valid SEV2 command with description",
-			text: "start SEV2 incident database connection issues -- Connection pool exhausted, affecting all users",
+			name: "valid SEV1 command with description",
+			text: "start SEV1 incident database connection issues -- Connection pool exhausted, affecting all users",
 			want: &Command{
 				Action:      "start",
-				Severity:    Severity2,
+				Severity:    Severity1,
 				Title:       "database connection issues",
 				Description: "Connection pool exhausted, affecting all users",
 			},
@@ -58,13 +58,13 @@ func TestParseCommand(t *testing.T) {
 		},
 		{
 			name:    "insufficient arguments",
-			text:    "start SEV1",
+			text:    "start SEV0",
 			want:    nil,
 			wantErr: true,
 		},
 		{
 			name:    "unknown action",
-			text:    "stop SEV1 incident test",
+			text:    "stop SEV0 incident test",
 			want:    nil,
 			wantErr: true,
 		},
@@ -76,13 +76,13 @@ func TestParseCommand(t *testing.T) {
 		},
 		{
 			name:    "missing incident keyword",
-			text:    "start SEV1 test incident",
+			text:    "start SEV0 test incident",
 			want:    nil,
 			wantErr: true,
 		},
 		{
 			name:    "empty title",
-			text:    "start SEV1 incident",
+			text:    "start SEV0 incident",
 			want:    nil,
 			wantErr: true,
 		},
@@ -238,13 +238,12 @@ func TestIsValidSeverity(t *testing.T) {
 		severity Severity
 		want     bool
 	}{
+		{"SEV0", Severity0, true},
 		{"SEV1", Severity1, true},
 		{"SEV2", Severity2, true},
 		{"SEV3", Severity3, true},
-		{"SEV4", Severity4, true},
-		{"SEV5", Severity5, true},
-		{"SEV6", "SEV6", false},
-		{"sev1", "sev1", false},
+		{"SEV4", "SEV4", false},
+		{"sev0", "sev0", false},
 		{"empty", "", false},
 	}
 
@@ -264,10 +263,14 @@ func TestGetHelpMessage(t *testing.T) {
 	// Check that help message contains expected content
 	expectedContent := []string{
 		"Usage:",
-		"/ohshift start",
-		"SEV1",
+		"/shift start",
+		"SEV0",
 		"incident",
 		"Examples:",
+		"Major Customer Impact",
+		"High Customer Impact",
+		"Low/No Customer Impact",
+		"Maintenance",
 	}
 
 	for _, content := range expectedContent {

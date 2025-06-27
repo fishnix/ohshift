@@ -1,5 +1,7 @@
 .PHONY: build test run clean deps lint help
 
+GEN_DB_URI="postgres://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@postgres:5432/$(POSTGRES_DB)_gen?sslmode=disable"
+
 # Default target
 .DEFAULT_GOAL := help
 
@@ -93,16 +95,6 @@ docker-run: ## Run with Docker
 		-e NOTIFICATIONS_CHANNEL \
 		ohshift:latest
 
-docker-dev: ## Run with Docker in development mode
-	docker run --rm -p 8080:8080 \
-		-v $(PWD):/app \
-		-w /app \
-		-e SLACK_BOT_TOKEN \
-		-e SLACK_SIGNING_SECRET \
-		-e NOTIFICATIONS_CHANNEL \
-		golang:1.24-alpine \
-		sh -c "apk add --no-cache git && go run main.go"
-
 fmt: ## Format code
 	$(GO) fmt ./...
 
@@ -118,3 +110,20 @@ release: clean build-all ## Create release builds
 	cp $(BUILD_DIR)/ohshift-macos release/ohshift-darwin-amd64
 	cp $(BUILD_DIR)/ohshift.exe release/ohshift-windows-amd64.exe
 	@echo "Release builds created in release/ directory" 
+
+
+gen-database: | deps
+	@PGPASSWORD=${POSTGRES_PASSWORD} psql -h postgres -U ${POSTGRES_USER} -w -e -c "select version()" postgres
+	@PGPASSWORD=${POSTGRES_PASSWORD} psql -h postgres -U ${POSTGRES_USER} -w -e -c "drop database if exists ${POSTGRES_DB}_gen" postgres
+	@PGPASSWORD=${POSTGRES_PASSWORD} psql -h postgres -U ${POSTGRES_USER} -w -e -c "create database ${POSTGRES_DB}_gen" postgres
+	@DB_URI=${GEN_DB_URI} go run main.go migrate up
+
+gen-models:
+	$(MAKE) gen-database
+	bobgen-psql
+	mermerd -c "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}_gen?sslmode=disable" -e -s 'public' --ignoreTables 'goose_db_version' --useAllTables -o docs/gen_models_erd.md
+
+local-db:
+	@echo "Wiping and initializing local database..."
+	@PGPASSWORD=${POSTGRES_PASSWORD} psql -U ${POSTGRES_USER} -h postgres ${POSTGRES_DB} -f .devcontainer/scripts/local_wipe.sql
+	@PGPASSWORD=${POSTGRES_PASSWORD} psql -U ${POSTGRES_USER} -h postgres ${POSTGRES_DB} -f .devcontainer/scripts/local_init.sql

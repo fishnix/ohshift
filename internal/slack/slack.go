@@ -12,13 +12,19 @@ import (
 	"sync"
 	"time"
 
-	"github.com/fishnix/ohshift/config"
-	"github.com/fishnix/ohshift/incident"
-	"github.com/fishnix/ohshift/logger"
-	"github.com/fishnix/ohshift/timeline"
+	"github.com/fishnix/ohshift/internal/config"
+	"github.com/fishnix/ohshift/internal/incident"
+	"github.com/fishnix/ohshift/internal/logger"
+	"github.com/fishnix/ohshift/internal/timeline"
 	"github.com/slack-go/slack"
 	"github.com/slack-go/slack/slackevents"
 	"github.com/slack-go/slack/socketmode"
+)
+
+const (
+	timelineCommand                = "timeline"
+	MsgCommandNotInIncidentChannel = "❌ This command can only be used in incident channels."
+	MsgTimelineNotFound            = "❌ Timeline not found for this incident."
 )
 
 // Bot represents the Slack bot
@@ -29,7 +35,8 @@ type Bot struct {
 	config       *config.Config
 	logger       *slog.Logger
 	timelineMgr  *timeline.Manager
-	// Mapping of channel IDs to incident IDs
+	// TODO: Replace this mapping of channel IDs to
+	// incident IDs with something more durable
 	channelToIncident map[string]string
 	mu                sync.RWMutex
 }
@@ -96,7 +103,7 @@ func (b *Bot) handleSlashCommand(evt *socketmode.Event, client *socketmode.Clien
 		"channel_id", cmd.ChannelID)
 
 	// Check if this is the timeline command
-	if cmd.Text == "timeline" {
+	if cmd.Text == timelineCommand {
 		b.handleTimelineCommand(cmd, client, evt)
 		return
 	}
@@ -117,13 +124,16 @@ func (b *Bot) handleSlashCommand(evt *socketmode.Event, client *socketmode.Clien
 	// Set user information
 	incidentCmd.UserID = cmd.UserID
 	incidentCmd.Username = cmd.UserName
+
 	// Create the incident
 	if err := b.createIncident(incidentCmd); err != nil {
 		b.logger.Error("Failed to create incident", "error", err, "user", cmd.UserName)
+
 		response := &slack.Msg{
 			ResponseType: "ephemeral",
 			Text:         fmt.Sprintf("Failed to create incident: %v", err),
 		}
+
 		b.sendSlashResponse(client, evt, response)
 
 		return
@@ -134,10 +144,11 @@ func (b *Bot) handleSlashCommand(evt *socketmode.Event, client *socketmode.Clien
 		ResponseType: "ephemeral",
 		Text:         "Incident created successfully! Check the notifications channel for details.",
 	}
+
 	b.sendSlashResponse(client, evt, response)
 }
 
-// handleTimelineCommand handles the /ohshift timeline command
+// handleTimelineCommand handles the /shift timeline command
 func (b *Bot) handleTimelineCommand(cmd slack.SlashCommand, client *socketmode.Client, evt *socketmode.Event) {
 	b.logger.Info("Processing timeline command",
 		"user", cmd.UserName,
@@ -152,7 +163,7 @@ func (b *Bot) handleTimelineCommand(cmd slack.SlashCommand, client *socketmode.C
 
 		response := &slack.Msg{
 			ResponseType: "ephemeral",
-			Text:         "❌ This command can only be used in incident channels.",
+			Text:         MsgCommandNotInIncidentChannel,
 		}
 		b.sendSlashResponse(client, evt, response)
 
@@ -169,7 +180,7 @@ func (b *Bot) handleTimelineCommand(cmd slack.SlashCommand, client *socketmode.C
 
 		response := &slack.Msg{
 			ResponseType: "ephemeral",
-			Text:         "❌ Timeline not found for this incident.",
+			Text:         MsgTimelineNotFound,
 		}
 
 		b.sendSlashResponse(client, evt, response)
@@ -184,6 +195,7 @@ func (b *Bot) handleTimelineCommand(cmd slack.SlashCommand, client *socketmode.C
 		ResponseType: "ephemeral",
 		Text:         timelineText,
 	}
+
 	b.sendSlashResponse(client, evt, response)
 
 	b.logger.Info("Timeline displayed successfully",
@@ -221,7 +233,7 @@ func (b *Bot) formatTimelineForDisplay(timeline *timeline.Timeline) string {
 			incidentDescription = desc
 		}
 
-		incidentStartedBy = entries[0].User
+		incidentStartedBy = entries[0].Username
 		incidentTime = entries[0].Timestamp
 	}
 
@@ -246,7 +258,7 @@ func (b *Bot) formatTimelineForDisplay(timeline *timeline.Timeline) string {
 		timestamp := entry.Timestamp.Format("15:04:05")
 		icon := b.getTimelineEntryIcon(entry.Type)
 
-		message += fmt.Sprintf("%s *%s* - @%s\n", icon, timestamp, entry.User)
+		message += fmt.Sprintf("%s *%s* - @%s\n", icon, timestamp, entry.Username)
 
 		// Format content based on entry type
 		switch entry.Type {
@@ -376,11 +388,12 @@ func (b *Bot) createIncident(cmd *incident.Command) error {
 
 	initialMessage := fmt.Sprintf("🚨 *%s Incident Started*\n\n"+
 		"*Severity:* %s\n"+
-		"*Started by:* @%s\n"+
+		"*Started by:* <@%s>\n"+
+		"*Title:* %s\n"+
 		"*Description:* %s\n"+
 		"*Started at:* %s\n\n"+
 		"Please provide updates and coordinate the response in this channel.",
-		cmd.Severity, cmd.Severity, cmd.Username, descriptionText, inc.StartedAt.Format("2006-01-02 15:04:05"))
+		cmd.Severity, cmd.Severity, cmd.UserID, cmd.Title, descriptionText, inc.StartedAt.Format("2006-01-02 15:04:05"))
 
 	_, _, err = b.api.PostMessage(channel.ID, slack.MsgOptionText(initialMessage, false))
 	if err != nil {
@@ -388,8 +401,14 @@ func (b *Bot) createIncident(cmd *incident.Command) error {
 	}
 
 	// Post notification in the notifications channel
-	notificationMessage := fmt.Sprintf("🚨 @%s started an incident: *%s*: <#%s>: %s",
-		cmd.Username, cmd.Severity, channel.ID, cmd.Title)
+	var notificationMessage string
+	if cmd.Description != "" {
+		notificationMessage = fmt.Sprintf("🚨 <@%s> started an incident: *%s*: <#%s>\n*Title:* %s\n*Description:* %s",
+			cmd.UserID, cmd.Severity, channel.ID, cmd.Title, cmd.Description)
+	} else {
+		notificationMessage = fmt.Sprintf("🚨 <@%s> started an incident: *%s*: <#%s>\n*Title:* %s",
+			cmd.UserID, cmd.Severity, channel.ID, cmd.Title)
+	}
 
 	_, _, err = b.api.PostMessage(b.config.NotificationsChannel, slack.MsgOptionText(notificationMessage, false))
 	if err != nil {
@@ -488,81 +507,6 @@ func (b *Bot) handleEventsAPI(evt *socketmode.Event, client *socketmode.Client) 
 	}
 }
 
-// handleMessageEvent handles message events from Events API
-func (b *Bot) handleMessageEvent(event *slackevents.EventsAPICallbackEvent) {
-	msg := slackevents.MessageEvent{}
-	if err := json.Unmarshal(*event.InnerEvent, &msg); err != nil {
-		b.logger.Debug("Unable to unmarshal MessageEvent", "error", err)
-		return
-	}
-
-	b.logger.Debug("Received message event",
-		"channel", msg.Channel,
-		"user", msg.User,
-		"message_length", len(msg.Text),
-		"timestamp", msg.TimeStamp)
-
-	// Check if this is an incident channel
-	if !strings.HasPrefix(msg.Channel, "C") {
-		b.logger.Debug("Skipping non-channel message", "channel", msg.Channel)
-		return // Not a channel message
-	}
-
-	// Get channel info to check if it's an incident channel
-	channel, err := b.api.GetConversationInfo(&slack.GetConversationInfoInput{
-		ChannelID: msg.Channel,
-	})
-	if err != nil {
-		b.logger.Warn("Failed to get channel info",
-			"error", err,
-			"channel", msg.Channel)
-		return
-	}
-
-	b.logger.Debug("Channel info retrieved",
-		"channel_id", msg.Channel,
-		"channel_name", channel.Name,
-		"is_incident_channel", strings.HasPrefix(channel.Name, "_inc-"))
-
-	// Check if this is an incident channel (starts with _inc-)
-	if !strings.HasPrefix(channel.Name, "_inc-") {
-		b.logger.Debug("Skipping non-incident channel message",
-			"channel_name", channel.Name)
-		return
-	}
-
-	// Find the incident ID for this channel
-	incidentID := b.findIncidentIDByChannel(msg.Channel)
-	if incidentID == "" {
-		b.logger.Warn("No incident ID found for channel",
-			"channel_id", msg.Channel,
-			"channel_name", channel.Name)
-		return
-	}
-
-	b.logger.Info("Adding message to incident timeline",
-		"incident_id", incidentID,
-		"channel_id", msg.Channel,
-		"channel_name", channel.Name,
-		"user", msg.User,
-		"message_length", len(msg.Text))
-
-	// Add message to timeline
-	err = b.timelineMgr.AddMessageEntry(incidentID, msg.User, msg.Text)
-	if err != nil {
-		b.logger.Error("Failed to add message to timeline",
-			"error", err,
-			"incident_id", incidentID,
-			"channel_id", msg.Channel,
-			"user", msg.User)
-	} else {
-		b.logger.Info("Message added to timeline successfully",
-			"incident_id", incidentID,
-			"channel_id", msg.Channel,
-			"user", msg.User)
-	}
-}
-
 // handleReactionAddedEvent handles reaction added events from Events API
 func (b *Bot) handleReactionAddedEvent(event *slackevents.EventsAPICallbackEvent) {
 	b.logger.Debug("Attempting to parse reaction added event",
@@ -575,7 +519,6 @@ func (b *Bot) handleReactionAddedEvent(event *slackevents.EventsAPICallbackEvent
 		return
 	}
 
-	// Original parsing logic for standard slackevents.ReactionAddedEvent
 	b.logger.Debug("Successfully parsed reaction added event",
 		"channel", reaction.Item.Channel,
 		"user", reaction.User,
@@ -585,7 +528,7 @@ func (b *Bot) handleReactionAddedEvent(event *slackevents.EventsAPICallbackEvent
 
 	// Check if this is a point_up or point_up_2 reaction
 	if reaction.Reaction != "point_up" && reaction.Reaction != "point_up_2" {
-		b.logger.Debug("Skipping non-point_up reaction",
+		b.logger.Debug("Skipping unhandled reaction",
 			"reaction", reaction.Reaction)
 		return
 	}
@@ -660,7 +603,7 @@ func (b *Bot) handleReactionAddedEvent(event *slackevents.EventsAPICallbackEvent
 		"parsed_time", messageTimestamp)
 
 	// Add highlighted entry to timeline
-	err = b.timelineMgr.AddHighlightedEntry(incidentID, messageUser, messageText, messageTimestamp)
+	err = b.timelineMgr.AddHighlightedEntry(incidentID, messageUser, messageText, msg.Messages[0].Timestamp, messageTimestamp)
 	if err != nil {
 		b.logger.Error("Failed to add highlighted entry to timeline",
 			"error", err,
@@ -727,7 +670,7 @@ func (b *Bot) handleFileSharedEvent(event *slackevents.EventsAPICallbackEvent) {
 			"caption", caption)
 
 		// Add image to timeline
-		err := b.timelineMgr.AddImageEntry(incidentID, file.UserID, fileInfo.URLPrivate, caption)
+		err := b.timelineMgr.AddImageEntry(incidentID, file.UserID, fileInfo.URLPrivate, caption, file.FileID)
 		if err != nil {
 			b.logger.Error("Failed to add image to timeline",
 				"error", err,

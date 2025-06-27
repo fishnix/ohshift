@@ -25,7 +25,8 @@
 				"shardulm94.trailing-spaces",
 				"netcorext.uuid-generator",
 				"ms-vscode.makefile-tools",
-				"github.vscode-github-actions"
+				"github.vscode-github-actions",
+				"bierner.markdown-mermaid"
 			]
 		}
 	},

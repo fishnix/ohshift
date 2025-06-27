@@ -13,16 +13,14 @@ import (
 type Severity string
 
 const (
-	// Severity1 represents a critical incident (highest priority)
+	// Severity0 represents a major customer impact incident (highest priority)
+	Severity0 Severity = "SEV0"
+	// Severity1 represents a high customer impact incident
 	Severity1 Severity = "SEV1"
-	// Severity2 represents a high priority incident
+	// Severity2 represents a low/no customer impact incident
 	Severity2 Severity = "SEV2"
-	// Severity3 represents a medium priority incident
+	// Severity3 represents a maintenance incident (lowest priority)
 	Severity3 Severity = "SEV3"
-	// Severity4 represents a low priority incident
-	Severity4 Severity = "SEV4"
-	// Severity5 represents an informational incident (lowest priority)
-	Severity5 Severity = "SEV5"
 )
 
 // Incident represents an incident
@@ -139,7 +137,7 @@ func createSlug(s string) string {
 
 // isValidSeverity checks if a severity is valid
 func isValidSeverity(s Severity) bool {
-	validSeverities := []Severity{Severity1, Severity2, Severity3, Severity4, Severity5}
+	validSeverities := []Severity{Severity0, Severity1, Severity2, Severity3}
 	for _, valid := range validSeverities {
 		if s == valid {
 			return true
@@ -151,14 +149,18 @@ func isValidSeverity(s Severity) bool {
 
 // GetHelpMessage returns the help message for the slash command
 func GetHelpMessage() string {
-	return `Usage: /ohshift start <severity> incident <incident title> [-- <description>]
+	return `Usage: /shift start <severity> incident <incident title> [-- <description>]
 
 Examples:
-  /ohshift start SEV1 incident the website is down
-  /ohshift start SEV2 incident database connection issues -- Connection pool exhausted, affecting all users
-  /ohshift start SEV3 incident slow response times -- API response times > 5s, investigating root cause
+  /shift start SEV0 incident the website is down
+  /shift start SEV1 incident database connection issues -- Connection pool exhausted, affecting all users
+  /shift start SEV2 incident slow response times -- API response times > 5s, investigating root cause
 
-Valid severities: SEV1, SEV2, SEV3, SEV4, SEV5
+Valid severities:
+  SEV0: Major Customer Impact
+  SEV1: High Customer Impact
+  SEV2: Low/No Customer Impact
+  SEV3: Maintenance
 
 This will create an incident channel and post a notification.`
 }
