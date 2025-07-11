@@ -1,17 +1,23 @@
 {
     "display_information": {
-        "name": "OhShift"
+        "name": "Shift"
     },
     "features": {
         "bot_user": {
-            "display_name": "OhShift",
+            "display_name": "Shift",
             "always_online": false
         },
         "slash_commands": [
             {
                 "command": "/ohshift",
                 "description": "Create an incident",
-                "usage_hint": "/ohshift start <SEVERITY> incident <DESCRIPTION>",
+                "usage_hint": "start <SEVERITY> incident <DESCRIPTION>",
+                "should_escape": false
+            },
+            {
+                "command": "/shift",
+                "description": "Create an incident",
+                "usage_hint": "start <SEVERITY> incident <DESCRIPTION>",
                 "should_escape": false
             }
         ]

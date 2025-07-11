@@ -1,12 +1,12 @@
 # OhShift! - Slack Incident Management Bot
 
-OhShift! is a Slack bot for managing incidents, built in Go. It provides a simple slash command interface to create incident channels and notify team members, and now uses **Slack Socket Mode** (no public HTTP endpoint required).
+OhShift! is a Slack bot for managing incidents, built in Go. It provides a simple slash command interface to create incident channels and notify team members, and uses **Slack Socket Mode** (no public HTTP endpoint required).
 
 ## Features
 
-- **Slash Command Interface**: Use `/ohshift start <severity> incident <title>` to create incidents
+- **Slash Command Interface**: Use `/shift start <severity> incident <title>` to create incidents
 - **Automatic Channel Creation**: Creates incident channels with descriptive names
-- **Severity Levels**: Supports SEV1-SEV5 severity levels
+- **Severity Levels**: Supports SEV0-SEV3 severity levels
 - **Notifications**: Posts notifications to a configurable channel
 - **Slug Generation**: Automatically converts incident titles to Slack-compatible channel names
 - **Help System**: Provides helpful error messages and usage instructions
@@ -48,21 +48,25 @@ The bot is configured using environment variables:
 | `SLACK_BOT_TOKEN`       | Slack bot user OAuth token                  | -            | Yes      |
 | `SLACK_APP_TOKEN`       | Slack app-level token (for Socket Mode)     | -            | Yes      |
 | `SLACK_SIGNING_SECRET`  | Slack app signing secret                    | -            | Yes      |
-| `SLASH_COMMAND`         | Slash command to trigger the bot            | `/ohshift`   | No       |
+| `DB_URI`                | PostgreSQL database connection string       | -            | Yes      |
+| `SLASH_COMMAND`         | Slash command to trigger the bot            | `/shift`   | No       |
 | `NOTIFICATIONS_CHANNEL` | Channel for incident notifications          | `general`    | No       |
 | `LOG_LEVEL`             | Logging level (debug, info, warn, error)    | `info`       | No       |
+| `ADD_ALL_MESSAGES_TO_TIMELINE` | Add all messages to timeline (false = only images/reactions) | `false` | No |
 
 ### Example Environment File
 
 Create a `.env` file:
 
 ```env
-SLACK_BOT_TOKEN=xoxb-your-bot-token-here
-SLACK_APP_TOKEN=xapp-your-app-level-token-here
-SLACK_SIGNING_SECRET=your-signing-secret-here
-SLASH_COMMAND=/ohshift
+SLACK_BOT_TOKEN=xoxb-your-bot-token
+SLACK_APP_TOKEN=xapp-your-app-level-token
+SLACK_SIGNING_SECRET=your-signing-secret
+DB_URI=postgres://username:password@localhost:5432/ohshift?sslmode=disable
+SLASH_COMMAND=/shift
 NOTIFICATIONS_CHANNEL=incidents
 LOG_LEVEL=info
+ADD_ALL_MESSAGES_TO_TIMELINE=false
 ```
 
 ## Slack App Setup (with Socket Mode)
@@ -70,41 +74,36 @@ LOG_LEVEL=info
 ### 1. Create a Slack App
 
 1. Go to [api.slack.com/apps](https://api.slack.com/apps)
-2. Click "Create New App" → "From scratch"
-3. Name your app "OhShift!" and select your workspace
+2. Click "Create New App" → "From manifest"
+3. Select your workspace.
+4. Modify the example manifest (`slack.example.manifest.json`) and past the contents
+5. Review the summary and click create
 
-### 2. Enable Socket Mode
+### 2. Generate an app token
 
-1. In your app settings, go to **Socket Mode**
-2. Toggle **Enable Socket Mode**
-3. Generate an **App-Level Token** (starts with `xapp-`)
+1. In your app settings, go to **Basic Information**
+2. Scroll to **App-Level Tokens** , click **Generate Token and Scopes**
+3. Set the name and add the `connections:write` scope.
+3. Click **Generate** and save the token (starts with `xapp-`)
 4. Add this token to your environment as `SLACK_APP_TOKEN`
 
-### 3. Configure Bot Token Scopes
-
-Under "OAuth & Permissions", add these bot token scopes:
-
-- `channels:manage` - Create incident channels
-- `chat:write` - Post messages
-- `commands` - Handle slash commands
-
-### 4. Install the App
+### 3. Install the App
 
 1. Go to "Install App" in the sidebar
 2. Click "Install to Workspace"
 3. Copy the "Bot User OAuth Token" (starts with `xoxb-`)
 
-### 5. Configure Slash Command
+### 4. Configure Slash Command
 
 1. Go to "Slash Commands" in the sidebar
 2. Click "Create New Command"
 3. Configure:
-   - Command: `/ohshift`
+   - Command: `/shift`
    - (Request URL is not required for Socket Mode)
    - Short Description: "Manage incidents"
    - Usage Hint: "start <severity> incident <title>"
 
-### 6. Get Signing Secret
+### 5. Get Signing Secret
 
 1. Go to "Basic Information" in the sidebar
 2. Copy the "Signing Secret"
@@ -116,24 +115,23 @@ Under "OAuth & Permissions", add these bot token scopes:
 Use the slash command format:
 
 ```
-/ohshift start <severity> incident <incident title>
+/shift start <severity> incident <incident title>
 ```
 
 #### Examples:
 
 ```
-/ohshift start SEV1 incident the website is down
-/ohshift start SEV2 incident database connection issues
-/ohshift start SEV3 incident slow response times
+/shift start SEV0 incident the website is down
+/shift start SEV1 incident database connection issues
+/shift start SEV2 incident slow response times
 ```
 
 #### Valid Severity Levels:
 
-- `SEV1` - Critical (highest priority)
-- `SEV2` - High
-- `SEV3` - Medium
-- `SEV4` - Low
-- `SEV5` - Info (lowest priority)
+- `SEV0` - Major Customer Impact (highest priority)
+- `SEV1` - High Customer Impact
+- `SEV2` - Low/No Customer Impact
+- `SEV3` - Maintenance (lowest priority)
 
 ### What Happens When You Start an Incident
 
@@ -151,7 +149,7 @@ Use the slash command format:
 
 3. **Notification**: A notification is posted in the configured notifications channel:
    ```
-   🚨 @username started an incident: SEV1: _inc-20241201-143052-website-down: the website is down
+   🚨 @username started an incident: SEV0: _inc-20241201-143052-website-down: the website is down
    ```
 
 ### Channel Name Generation
@@ -163,6 +161,18 @@ The bot automatically converts incident titles to Slack-compatible channel names
 - Truncates to 64 characters (Slack limit)
 - Ensures names don't end with hyphens
 
+### Timeline Management
+
+The bot automatically maintains a timeline of important events in each incident channel. By default, only specific types of messages are added to the timeline:
+
+- **Images**: When someone shares an image file, it's automatically added to the timeline
+- **Highlighted Messages**: When someone reacts with :point_up: or :point_up_2: to a message, that message is added to the timeline
+- **All Messages**: If `ADD_ALL_MESSAGES_TO_TIMELINE=true` is set, all messages in incident channels are added to the timeline
+
+This selective approach helps keep the timeline focused on important information while preventing it from being cluttered with routine conversation.
+
+To view the timeline for an incident, use the `/shift timeline` command in any incident channel.
+
 ## Running the Bot
 
 ### Development
@@ -171,7 +181,8 @@ The bot automatically converts incident titles to Slack-compatible channel names
 export SLACK_BOT_TOKEN=xoxb-your-token
 export SLACK_APP_TOKEN=xapp-your-app-token
 export SLACK_SIGNING_SECRET=your-secret
-export SLASH_COMMAND=/ohshift
+export DB_URI=postgres://username:password@localhost:5432/ohshift?sslmode=disable
+export SLASH_COMMAND=/shift
 export NOTIFICATIONS_CHANNEL=incidents
 export LOG_LEVEL=debug
 
@@ -196,6 +207,34 @@ The bot will connect to Slack via Socket Mode and listen for slash commands in r
 ├── main.go          # Application entry point
 ├── go.mod           # Go module file (module path: github.com/fishnix/ohshift)
 └── README.md        # This file
+```
+
+## Development
+
+### Database Models
+
+The application uses [SQLBoiler](https://github.com/volatiletech/sqlboiler) to generate Go models from the database schema. To regenerate the models after schema changes:
+
+```bash
+make gen-models
+```
+
+This command will:
+1. Create a temporary database with the current schema
+2. Generate Go models using SQLBoiler
+3. Generate an Entity Relationship Diagram (ERD) in Mermaid format
+
+The automatically generated ERD can be found at: [docs/gen_models_erd.md](docs/gen_models_erd.md)
+
+### Available Make Commands
+
+```bash
+make help          # Show all available commands
+make build         # Build the application
+make test          # Run tests
+make lint          # Run golangci-lint
+make gen-models    # Generate database models and ERD
+make clean         # Clean build artifacts
 ```
 
 ## Testing

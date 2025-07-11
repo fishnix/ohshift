@@ -8,16 +8,18 @@ import (
 	"sync"
 	"time"
 
-	"github.com/fishnix/ohshift/incident"
-	"github.com/fishnix/ohshift/logger"
+	"github.com/fishnix/ohshift/internal/incident"
+	"github.com/fishnix/ohshift/internal/logger"
 	"github.com/slack-go/slack"
 )
 
 // Entry represents a single entry in the timeline
 type Entry struct {
+	ID        string // Unique identifier to prevent duplicates
 	Timestamp time.Time
 	Type      string // "incident_start", "message", "image", "reaction", "bot_interaction"
-	User      string
+	UserID    string // Slack user ID (e.g., "U0123456")
+	Username  string // Slack username (e.g., "thatopsguy")
 	Content   string
 	Metadata  map[string]interface{}
 }
@@ -36,6 +38,7 @@ type Manager struct {
 	api       *slack.Client
 	logger    *slog.Logger
 	timelines map[string]*Timeline
+	userCache map[string]string // userID -> username cache
 	mu        sync.RWMutex
 }
 
@@ -45,7 +48,52 @@ func NewManager(api *slack.Client) *Manager {
 		api:       api,
 		logger:    logger.With("component", "timeline_manager"),
 		timelines: make(map[string]*Timeline),
+		userCache: make(map[string]string),
 	}
+}
+
+// resolveUsername resolves a user ID to a username using the Slack API
+func (m *Manager) resolveUsername(userID string) string {
+	// Check cache first
+	m.mu.RLock()
+
+	if username, exists := m.userCache[userID]; exists {
+		m.mu.RUnlock()
+		return username
+	}
+
+	m.mu.RUnlock()
+
+	// If not in cache, fetch from Slack API
+	user, err := m.api.GetUserInfo(userID)
+	if err != nil {
+		m.logger.Warn("Failed to get user info, using user ID as fallback",
+			"error", err,
+			"user_id", userID)
+		// Cache the user ID as fallback to avoid repeated API calls
+		m.mu.Lock()
+		m.userCache[userID] = userID
+		m.mu.Unlock()
+
+		return userID
+	}
+
+	// Cache the username
+	m.mu.Lock()
+	m.userCache[userID] = user.Name
+	m.mu.Unlock()
+
+	m.logger.Debug("Resolved user ID to username",
+		"user_id", userID,
+		"username", user.Name)
+
+	return user.Name
+}
+
+// resolveUserInfo resolves a user ID to both user ID and username
+func (m *Manager) resolveUserInfo(userID string) (string, string) {
+	username := m.resolveUsername(userID)
+	return userID, username
 }
 
 // CreateTimeline creates a new timeline for an incident
@@ -56,10 +104,15 @@ func (m *Manager) CreateTimeline(inc *incident.Incident, channelID string) (*Tim
 		"severity", inc.Severity,
 		"title", inc.Title)
 
+	// Resolve user ID to username for the incident starter
+	userID, username := m.resolveUserInfo(inc.StartedBy)
+
 	initialEntry := Entry{
+		ID:        fmt.Sprintf("incident_start_%s", inc.ID),
 		Timestamp: inc.StartedAt,
 		Type:      "incident_start",
-		User:      inc.StartedBy,
+		UserID:    userID,
+		Username:  username,
 		Content:   fmt.Sprintf("🚨 %s Incident Started", inc.Severity),
 		Metadata: map[string]interface{}{
 			"severity":    inc.Severity,
@@ -116,7 +169,8 @@ func (m *Manager) AddEntry(incidentID string, entry Entry) error {
 	m.logger.Info("Adding entry to timeline",
 		"incident_id", incidentID,
 		"entry_type", entry.Type,
-		"user", entry.User,
+		"entry_id", entry.ID,
+		"user", entry.Username,
 		"timestamp", entry.Timestamp)
 
 	m.mu.Lock()
@@ -127,12 +181,28 @@ func (m *Manager) AddEntry(incidentID string, entry Entry) error {
 		m.logger.Error("Timeline not found for entry",
 			"incident_id", incidentID,
 			"entry_type", entry.Type,
-			"user", entry.User)
+			"entry_id", entry.ID,
+			"user", entry.Username)
 
 		return fmt.Errorf("timeline not found for incident: %s", incidentID)
 	}
 
+	// Check for duplicate entry
 	timeline.mu.Lock()
+
+	for _, existingEntry := range timeline.Entries {
+		if existingEntry.ID == entry.ID {
+			timeline.mu.Unlock()
+			m.logger.Debug("Duplicate entry skipped",
+				"incident_id", incidentID,
+				"entry_id", entry.ID,
+				"entry_type", entry.Type,
+				"user", entry.Username)
+
+			return nil // Skip duplicate entry
+		}
+	}
+
 	timeline.Entries = append(timeline.Entries, entry)
 	timeline.LastUpdated = time.Now()
 	entriesCount := len(timeline.Entries)
@@ -141,8 +211,9 @@ func (m *Manager) AddEntry(incidentID string, entry Entry) error {
 	m.logger.Info("Entry added to timeline in memory",
 		"incident_id", incidentID,
 		"entry_type", entry.Type,
+		"entry_id", entry.ID,
 		"total_entries", entriesCount,
-		"user", entry.User)
+		"user", entry.Username)
 
 	// Update timeline in channel
 	err := m.postTimelineToChannel(timeline)
@@ -155,47 +226,84 @@ func (m *Manager) AddEntry(incidentID string, entry Entry) error {
 		return err
 	}
 
-	m.logger.Info("Timeline updated in channel successfully",
+	// Add white check mark reaction for entries that correspond to Slack messages
+	if entry.Type == "message" || entry.Type == "image" || entry.Type == "highlighted" {
+		if messageID, ok := entry.Metadata["message_id"].(string); ok {
+			if err := m.addReactionToMessage(timeline.ChannelID, messageID, "white_check_mark"); err != nil {
+				m.logger.Warn("Failed to add reaction to message (non-critical)",
+					"error", err,
+					"incident_id", incidentID,
+					"entry_type", entry.Type,
+					"entry_id", entry.ID,
+					"message_id", messageID)
+				// Don't return error here as the timeline entry was successfully added
+			} else {
+				m.logger.Debug("White check mark reaction added to message",
+					"incident_id", incidentID,
+					"entry_type", entry.Type,
+					"entry_id", entry.ID,
+					"message_id", messageID)
+			}
+		}
+	}
+
+	m.logger.Info("Timeline updated successfully",
 		"incident_id", incidentID,
 		"entry_type", entry.Type,
+		"entry_id", entry.ID,
 		"total_entries", entriesCount)
 
 	return nil
 }
 
 // AddMessageEntry adds a message to the timeline
-func (m *Manager) AddMessageEntry(incidentID, user, message string) error {
+func (m *Manager) AddMessageEntry(incidentID, userID, message, messageID string) error {
 	m.logger.Debug("Adding message entry to timeline",
 		"incident_id", incidentID,
-		"user", user,
+		"user_id", userID,
+		"message_id", messageID,
 		"message_length", len(message))
 
+	// Resolve user ID to username
+	resolvedUserID, username := m.resolveUserInfo(userID)
+
 	entry := Entry{
+		ID:        fmt.Sprintf("message_%s", messageID),
 		Timestamp: time.Now(),
 		Type:      "message",
-		User:      user,
+		UserID:    resolvedUserID,
+		Username:  username,
 		Content:   message,
-		Metadata:  map[string]interface{}{},
+		Metadata: map[string]interface{}{
+			"message_id": messageID,
+		},
 	}
 
 	return m.AddEntry(incidentID, entry)
 }
 
 // AddImageEntry adds an image to the timeline
-func (m *Manager) AddImageEntry(incidentID, user, imageURL, caption string) error {
+func (m *Manager) AddImageEntry(incidentID, userID, imageURL, caption, messageID string) error {
 	m.logger.Debug("Adding image entry to timeline",
 		"incident_id", incidentID,
-		"user", user,
+		"user_id", userID,
+		"message_id", messageID,
 		"image_url", imageURL,
 		"caption", caption)
 
+	// Resolve user ID to username
+	resolvedUserID, username := m.resolveUserInfo(userID)
+
 	entry := Entry{
+		ID:        fmt.Sprintf("image_%s", messageID),
 		Timestamp: time.Now(),
 		Type:      "image",
-		User:      user,
+		UserID:    resolvedUserID,
+		Username:  username,
 		Content:   caption,
 		Metadata: map[string]interface{}{
-			"image_url": imageURL,
+			"image_url":  imageURL,
+			"message_id": messageID,
 		},
 	}
 
@@ -203,20 +311,27 @@ func (m *Manager) AddImageEntry(incidentID, user, imageURL, caption string) erro
 }
 
 // AddReactionEntry adds a reaction to the timeline
-func (m *Manager) AddReactionEntry(incidentID, user, message, reaction string) error {
+func (m *Manager) AddReactionEntry(incidentID, userID, message, reaction, messageID string) error {
 	m.logger.Debug("Adding reaction entry to timeline",
 		"incident_id", incidentID,
-		"user", user,
+		"user_id", userID,
+		"message_id", messageID,
 		"reaction", reaction,
 		"message_length", len(message))
 
+	// Resolve user ID to username
+	resolvedUserID, username := m.resolveUserInfo(userID)
+
 	entry := Entry{
+		ID:        fmt.Sprintf("reaction_%s_%s", messageID, reaction),
 		Timestamp: time.Now(),
 		Type:      "reaction",
-		User:      user,
+		UserID:    resolvedUserID,
+		Username:  username,
 		Content:   message,
 		Metadata: map[string]interface{}{
-			"reaction": reaction,
+			"reaction":   reaction,
+			"message_id": messageID,
 		},
 	}
 
@@ -224,16 +339,21 @@ func (m *Manager) AddReactionEntry(incidentID, user, message, reaction string) e
 }
 
 // AddBotInteractionEntry adds a bot interaction to the timeline
-func (m *Manager) AddBotInteractionEntry(incidentID, user, interaction string) error {
+func (m *Manager) AddBotInteractionEntry(incidentID, userID, interaction string) error {
 	m.logger.Debug("Adding bot interaction entry to timeline",
 		"incident_id", incidentID,
-		"user", user,
+		"user_id", userID,
 		"interaction", interaction)
 
+	// Resolve user ID to username
+	resolvedUserID, username := m.resolveUserInfo(userID)
+
 	entry := Entry{
+		ID:        fmt.Sprintf("bot_interaction_%s_%d", userID, time.Now().UnixNano()),
 		Timestamp: time.Now(),
 		Type:      "bot_interaction",
-		User:      user,
+		UserID:    resolvedUserID,
+		Username:  username,
 		Content:   interaction,
 		Metadata:  map[string]interface{}{},
 	}
@@ -242,19 +362,27 @@ func (m *Manager) AddBotInteractionEntry(incidentID, user, interaction string) e
 }
 
 // AddHighlightedEntry adds a highlighted message to the timeline (e.g., for :point_up: reactions)
-func (m *Manager) AddHighlightedEntry(incidentID, user, message string, originalTimestamp time.Time) error {
+func (m *Manager) AddHighlightedEntry(incidentID, userID, message, messageID string, originalTimestamp time.Time) error {
 	m.logger.Debug("Adding highlighted entry to timeline",
 		"incident_id", incidentID,
-		"user", user,
+		"user_id", userID,
+		"message_id", messageID,
 		"message_length", len(message),
 		"original_timestamp", originalTimestamp)
 
+	// Resolve user ID to username
+	resolvedUserID, username := m.resolveUserInfo(userID)
+
 	entry := Entry{
+		ID:        fmt.Sprintf("highlighted_%s", messageID),
 		Timestamp: originalTimestamp,
 		Type:      "highlighted",
-		User:      user,
+		UserID:    resolvedUserID,
+		Username:  username,
 		Content:   message,
-		Metadata:  map[string]interface{}{},
+		Metadata: map[string]interface{}{
+			"message_id": messageID,
+		},
 	}
 
 	return m.AddEntry(incidentID, entry)
@@ -318,7 +446,10 @@ func (m *Manager) formatTimelineMessage(entries []Entry) string {
 		timestamp := entry.Timestamp.Format("15:04:05")
 		icon := m.getEntryIcon(entry.Type)
 
-		message += fmt.Sprintf("%s *%s* - @%s\n", icon, timestamp, entry.User)
+		// Ensure we have a username to display (backward compatibility)
+		displayName := m.ensureUsername(entry)
+
+		message += fmt.Sprintf("%s *%s* - @%s\n", icon, timestamp, displayName)
 		message += fmt.Sprintf("   %s\n", entry.Content)
 
 		// Add metadata if present
@@ -338,6 +469,22 @@ func (m *Manager) formatTimelineMessage(entries []Entry) string {
 		"message_length", len(message))
 
 	return message
+}
+
+// ensureUsername ensures we have a username to display, handling backward compatibility
+func (m *Manager) ensureUsername(entry Entry) string {
+	// If we already have a username, use it
+	if entry.Username != "" {
+		return entry.Username
+	}
+
+	// If we have a user ID, resolve it to a username
+	if entry.UserID != "" {
+		return m.resolveUsername(entry.UserID)
+	}
+
+	// Fallback to a generic name if neither is available
+	return "unknown_user"
 }
 
 // getEntryIcon returns the appropriate icon for an entry type
@@ -405,4 +552,52 @@ func (t *Timeline) GetLastUpdated() time.Time {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 	return t.LastUpdated
+}
+
+// HasEntry checks if a timeline already has an entry with the given ID
+func (m *Manager) HasEntry(incidentID, entryID string) bool {
+	timeline, exists := m.GetTimeline(incidentID)
+	if !exists {
+		return false
+	}
+
+	timeline.mu.RLock()
+	defer timeline.mu.RUnlock()
+
+	for _, entry := range timeline.Entries {
+		if entry.ID == entryID {
+			return true
+		}
+	}
+
+	return false
+}
+
+// addReactionToMessage adds a reaction to a message in Slack
+func (m *Manager) addReactionToMessage(channelID, messageTimestamp, reaction string) error {
+	m.logger.Debug("Adding reaction to message",
+		"channel_id", channelID,
+		"message_timestamp", messageTimestamp,
+		"reaction", reaction)
+
+	err := m.api.AddReaction(reaction, slack.ItemRef{
+		Channel:   channelID,
+		Timestamp: messageTimestamp,
+	})
+	if err != nil {
+		m.logger.Error("Failed to add reaction to message",
+			"error", err,
+			"channel_id", channelID,
+			"message_timestamp", messageTimestamp,
+			"reaction", reaction)
+
+		return err
+	}
+
+	m.logger.Debug("Reaction added successfully",
+		"channel_id", channelID,
+		"message_timestamp", messageTimestamp,
+		"reaction", reaction)
+
+	return nil
 }

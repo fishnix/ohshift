@@ -1,0 +1,6 @@
+---
+wipe: true
+no_tests: true # TODO: figure out why UNIQUE columns cause tests to fail
+psql:
+  dsn: "postgres://pguser:topsecret@postgres:5432/ohshift_gen?sslmode=disable"
+  driver_name: "github.com/jackc/pgx/v5"

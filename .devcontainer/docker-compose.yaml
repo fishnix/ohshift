@@ -14,3 +14,22 @@ services:
       - ..:/workspace:cached
     networks:
       - ohshift
+    depends_on:
+      - postgres
+
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    volumes:
+      - psql-data:/tmp/dev/pgsql/data
+    env_file:
+        - .env
+    expose:
+      - "5432"
+    ports:
+      - "55432:5432"
+    networks:
+      - ohshift
+
+volumes:
+  psql-data:
