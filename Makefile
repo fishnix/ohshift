@@ -100,7 +100,7 @@ docker-dev: ## Run with Docker in development mode
 		-e SLACK_BOT_TOKEN \
 		-e SLACK_SIGNING_SECRET \
 		-e NOTIFICATIONS_CHANNEL \
-		golang:1.22-alpine \
+		golang:1.24-alpine \
 		sh -c "apk add --no-cache git && go run main.go"
 
 fmt: ## Format code

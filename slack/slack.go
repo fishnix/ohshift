@@ -39,6 +39,7 @@ func NewBot(cfg *config.Config) *Bot {
 	api := slack.New(cfg.SlackBotToken, slack.OptionAppLevelToken(cfg.SlackAppToken))
 	socketClient := socketmode.New(api)
 	handler := socketmode.NewSocketmodeHandler(socketClient)
+
 	return &Bot{
 		api:               api,
 		socketClient:      socketClient,
@@ -53,14 +54,18 @@ func NewBot(cfg *config.Config) *Bot {
 // Start starts the Socket Mode event loop and blocks until ctx is done
 func (b *Bot) Start(ctx context.Context) error {
 	b.setupEventHandlers()
+
 	// Run the event loop in a goroutine
 	errCh := make(chan error, 1)
+
 	go func() {
 		errCh <- b.handler.RunEventLoopContext(ctx)
 	}()
+
 	b.logger.Info("Slack bot started with Socket Mode",
 		"slash_command", b.config.SlashCommand,
 		"notifications_channel", b.config.NotificationsChannel)
+
 	select {
 	case <-ctx.Done():
 		b.logger.Info("Shutting down Slack bot")
@@ -105,8 +110,10 @@ func (b *Bot) handleSlashCommand(evt *socketmode.Event, client *socketmode.Clien
 			Text:         fmt.Sprintf("Error: %s\n\n%s", err.Error(), incident.GetHelpMessage()),
 		}
 		b.sendSlashResponse(client, evt, response)
+
 		return
 	}
+
 	// Set user information
 	incidentCmd.UserID = cmd.UserID
 	incidentCmd.Username = cmd.UserName
@@ -118,8 +125,10 @@ func (b *Bot) handleSlashCommand(evt *socketmode.Event, client *socketmode.Clien
 			Text:         fmt.Sprintf("Failed to create incident: %v", err),
 		}
 		b.sendSlashResponse(client, evt, response)
+
 		return
 	}
+
 	// Send success response
 	response := &slack.Msg{
 		ResponseType: "ephemeral",
@@ -146,6 +155,7 @@ func (b *Bot) handleTimelineCommand(cmd slack.SlashCommand, client *socketmode.C
 			Text:         "❌ This command can only be used in incident channels.",
 		}
 		b.sendSlashResponse(client, evt, response)
+
 		return
 	}
 
@@ -161,7 +171,9 @@ func (b *Bot) handleTimelineCommand(cmd slack.SlashCommand, client *socketmode.C
 			ResponseType: "ephemeral",
 			Text:         "❌ Timeline not found for this incident.",
 		}
+
 		b.sendSlashResponse(client, evt, response)
+
 		return
 	}
 
@@ -464,8 +476,8 @@ func (b *Bot) handleEventsAPI(evt *socketmode.Event, client *socketmode.Client) 
 	}
 
 	switch innerEventType {
-	// case "message":
-	// 	b.handleMessageEvent(cbEventData)
+	case "message":
+		b.handleMessageEvent(cbEventData)
 	case "reaction_added":
 		b.handleReactionAddedEvent(cbEventData)
 	case "file_shared":
@@ -606,6 +618,7 @@ func (b *Bot) handleReactionAddedEvent(event *slackevents.EventsAPICallbackEvent
 			"incident_id", incidentID,
 			"channel_id", reaction.Item.Channel,
 			"message_timestamp", reaction.Item.Timestamp)
+
 		return
 	}
 
@@ -614,6 +627,7 @@ func (b *Bot) handleReactionAddedEvent(event *slackevents.EventsAPICallbackEvent
 			"incident_id", incidentID,
 			"channel_id", reaction.Item.Channel,
 			"message_timestamp", reaction.Item.Timestamp)
+
 		return
 	}
 

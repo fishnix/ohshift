@@ -95,6 +95,7 @@ func (m *Manager) CreateTimeline(inc *incident.Incident, channelID string) (*Tim
 func (m *Manager) GetTimeline(incidentID string) (*Timeline, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+
 	timeline, exists := m.timelines[incidentID]
 
 	if exists {
@@ -127,6 +128,7 @@ func (m *Manager) AddEntry(incidentID string, entry Entry) error {
 			"incident_id", incidentID,
 			"entry_type", entry.Type,
 			"user", entry.User)
+
 		return fmt.Errorf("timeline not found for incident: %s", incidentID)
 	}
 
@@ -149,6 +151,7 @@ func (m *Manager) AddEntry(incidentID string, entry Entry) error {
 			"error", err,
 			"incident_id", incidentID,
 			"entry_type", entry.Type)
+
 		return err
 	}
 
@@ -267,6 +270,7 @@ func (m *Manager) postTimelineToChannel(timeline *Timeline) error {
 	entries := make([]Entry, len(timeline.Entries))
 	copy(entries, timeline.Entries)
 	entriesCount := len(entries)
+
 	timeline.mu.RUnlock()
 
 	// Create timeline message
@@ -286,6 +290,7 @@ func (m *Manager) postTimelineToChannel(timeline *Timeline) error {
 			"incident_id", timeline.IncidentID,
 			"channel_id", timeline.ChannelID,
 			"message_length", messageLength)
+
 		return err
 	}
 
@@ -391,6 +396,7 @@ func (t *Timeline) GetEntries() []Entry {
 
 	entries := make([]Entry, len(t.Entries))
 	copy(entries, t.Entries)
+
 	return entries
 }
 

@@ -145,6 +145,7 @@ func isValidSeverity(s Severity) bool {
 			return true
 		}
 	}
+
 	return false
 }
 
@@ -170,5 +171,6 @@ func GenerateIncidentID() string {
 		// Fallback to timestamp-based ID if random generation fails
 		return fmt.Sprintf("inc_%d", time.Now().UnixNano())
 	}
+
 	return fmt.Sprintf("inc_%x", bytes)
 }
