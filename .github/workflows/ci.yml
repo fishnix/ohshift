@@ -26,6 +26,7 @@ jobs:
         with:
           version: latest
           args: --timeout=5m
+          problem-matchers: true
 
   test:
     name: Test
