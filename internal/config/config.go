@@ -9,27 +9,29 @@ import (
 
 // Config holds all configuration for the OhShift bot
 type Config struct {
-	DBURI                string
-	SlackBotToken        string
-	SlackSigningSecret   string
-	SlackAppToken        string
-	SlashCommand         string
-	NotificationsChannel string
-	Port                 string
-	LogLevel             slog.Level
+	DBURI                    string
+	SlackBotToken            string
+	SlackSigningSecret       string
+	SlackAppToken            string
+	SlashCommand             string
+	NotificationsChannel     string
+	Port                     string
+	LogLevel                 slog.Level
+	AddAllMessagesToTimeline bool
 }
 
 // Load loads configuration from environment variables
 func Load() *Config {
 	config := &Config{
-		DBURI:                getEnv("DB_URI", ""),
-		SlackBotToken:        getEnv("SLACK_BOT_TOKEN", ""),
-		SlackSigningSecret:   getEnv("SLACK_SIGNING_SECRET", ""),
-		SlackAppToken:        getEnv("SLACK_APP_TOKEN", ""),
-		SlashCommand:         getEnv("SLASH_COMMAND", "/shift"),
-		NotificationsChannel: getEnv("NOTIFICATIONS_CHANNEL", "general"),
-		Port:                 getEnv("PORT", "8080"),
-		LogLevel:             parseLogLevel(getEnv("LOG_LEVEL", "info")),
+		DBURI:                    getEnv("DB_URI", ""),
+		SlackBotToken:            getEnv("SLACK_BOT_TOKEN", ""),
+		SlackSigningSecret:       getEnv("SLACK_SIGNING_SECRET", ""),
+		SlackAppToken:            getEnv("SLACK_APP_TOKEN", ""),
+		SlashCommand:             getEnv("SLASH_COMMAND", "/shift"),
+		NotificationsChannel:     getEnv("NOTIFICATIONS_CHANNEL", "general"),
+		Port:                     getEnv("PORT", "8080"),
+		LogLevel:                 parseLogLevel(getEnv("LOG_LEVEL", "info")),
+		AddAllMessagesToTimeline: getEnvBool("ADD_ALL_MESSAGES_TO_TIMELINE", false),
 	}
 
 	return config
@@ -73,6 +75,21 @@ func getEnv(key, defaultValue string) string {
 	if value := os.Getenv(key); value != "" {
 		return value
 	}
+	return defaultValue
+}
+
+// getEnvBool gets an environment variable and parses it as a boolean
+func getEnvBool(key string, defaultValue bool) bool {
+	if value := os.Getenv(key); value != "" {
+		if strings.ToLower(value) == "true" {
+			return true
+		}
+
+		if strings.ToLower(value) == "false" {
+			return false
+		}
+	}
+
 	return defaultValue
 }
 

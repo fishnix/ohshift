@@ -22,9 +22,11 @@ import (
 )
 
 const (
-	timelineCommand                = "timeline"
+	timelineCommand = "timeline"
+	// MsgCommandNotInIncidentChannel is the error message shown when timeline command is used outside incident channels
 	MsgCommandNotInIncidentChannel = "❌ This command can only be used in incident channels."
-	MsgTimelineNotFound            = "❌ Timeline not found for this incident."
+	// MsgTimelineNotFound is the error message shown when timeline is not found for an incident
+	MsgTimelineNotFound = "❌ Timeline not found for this incident."
 )
 
 // Bot represents the Slack bot
@@ -505,6 +507,110 @@ func (b *Bot) handleEventsAPI(evt *socketmode.Event, client *socketmode.Client) 
 		b.logger.Debug("Unhandled Events API event data type", "event_type", innerEventType)
 		return
 	}
+}
+
+// handleMessageEvent handles message events from Events API
+func (b *Bot) handleMessageEvent(event *slackevents.EventsAPICallbackEvent) {
+	msg := slackevents.MessageEvent{}
+	if err := json.Unmarshal(*event.InnerEvent, &msg); err != nil {
+		b.logger.Debug("Unable to unmarshal MessageEvent", "error", err)
+		return
+	}
+
+	b.logger.Debug("Received message event",
+		"channel", msg.Channel,
+		"user", msg.User,
+		"message_length", len(msg.Text),
+		"timestamp", msg.TimeStamp)
+
+	// Check if this is an incident channel
+	if !strings.HasPrefix(msg.Channel, "C") {
+		b.logger.Debug("Skipping non-channel message", "channel", msg.Channel)
+		return // Not a channel message
+	}
+
+	// Get channel info to check if it's an incident channel
+	channel, err := b.api.GetConversationInfo(&slack.GetConversationInfoInput{
+		ChannelID: msg.Channel,
+	})
+	if err != nil {
+		b.logger.Warn("Failed to get channel info",
+			"error", err,
+			"channel", msg.Channel)
+		return
+	}
+
+	b.logger.Debug("Channel info retrieved",
+		"channel_id", msg.Channel,
+		"channel_name", channel.Name,
+		"is_incident_channel", strings.HasPrefix(channel.Name, "_inc-"))
+
+	// Check if this is an incident channel (starts with _inc-)
+	if !strings.HasPrefix(channel.Name, "_inc-") {
+		b.logger.Debug("Skipping non-incident channel message",
+			"channel_name", channel.Name)
+		return
+	}
+
+	// Find the incident ID for this channel
+	incidentID := b.findIncidentIDByChannel(msg.Channel)
+	if incidentID == "" {
+		b.logger.Warn("No incident ID found for channel",
+			"channel_id", msg.Channel,
+			"channel_name", channel.Name)
+		return
+	}
+
+	// Check if we should add this message to the timeline
+	shouldAddMessage := b.config.AddAllMessagesToTimeline
+
+	// If not adding all messages, check if this message contains an image
+	if !shouldAddMessage {
+		// Check if the message contains an image (Slack image URLs)
+		if strings.Contains(msg.Text, "files.slack.com") && strings.Contains(msg.Text, "image") {
+			shouldAddMessage = true
+
+			b.logger.Debug("Message contains image, will add to timeline",
+				"incident_id", incidentID,
+				"channel_id", msg.Channel,
+				"user", msg.User)
+		}
+	}
+
+	// Only add to timeline if configured to do so
+	if !shouldAddMessage {
+		b.logger.Debug("Skipping message (not configured to add all messages and no image detected)",
+			"incident_id", incidentID,
+			"channel_id", msg.Channel,
+			"user", msg.User,
+			"message_length", len(msg.Text))
+
+		return
+	}
+
+	b.logger.Info("Adding message to incident timeline",
+		"incident_id", incidentID,
+		"channel_id", msg.Channel,
+		"channel_name", channel.Name,
+		"user", msg.User,
+		"message_length", len(msg.Text))
+
+	// Add message to timeline
+	err = b.timelineMgr.AddMessageEntry(incidentID, msg.User, msg.Text, msg.TimeStamp)
+	if err != nil {
+		b.logger.Error("Failed to add message to timeline",
+			"error", err,
+			"incident_id", incidentID,
+			"channel_id", msg.Channel,
+			"user", msg.User)
+
+		return
+	}
+
+	b.logger.Info("Message added to timeline successfully",
+		"incident_id", incidentID,
+		"channel_id", msg.Channel,
+		"user", msg.User)
 }
 
 // handleReactionAddedEvent handles reaction added events from Events API

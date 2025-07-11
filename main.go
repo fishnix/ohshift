@@ -23,20 +23,20 @@ import (
 var cfg *config.Config
 
 func main() {
-	var rootCmd = &cobra.Command{
+	rootCmd := &cobra.Command{
 		Use:   "ohshift",
 		Short: "OhShift! Slack incident management bot",
 		Long:  `OhShift! is a Slack bot for managing incidents and on-call rotations.`,
 	}
 
-	var botCmd = &cobra.Command{
+	botCmd := &cobra.Command{
 		Use:   "bot",
 		Short: "Start the Slack bot",
 		Long:  `Start the OhShift! Slack bot for incident management.`,
 		RunE:  runBot,
 	}
 
-	var migrateCmd = &cobra.Command{
+	migrateCmd := &cobra.Command{
 		Use:   "migrate <command> [args]",
 		Short: "Migrate the database",
 		Long: `Migrate provides a wrapper around the "goose" migration tool.
@@ -56,7 +56,9 @@ func main() {
 	`,
 		Args: cobra.MinimumNArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
-			runMigration(cmd.Context(), args[0], args[1:])
+			if err := runMigration(cmd.Context(), args[0], args[1:]); err != nil {
+				logger.Fatal("Migration failed", "error", err)
+			}
 		},
 	}
 
@@ -67,7 +69,7 @@ func main() {
 	}
 }
 
-func runBot(cmd *cobra.Command, args []string) error {
+func runBot(_ *cobra.Command, _ []string) error {
 	// Load configuration
 	cfg = config.Load()
 
@@ -104,6 +106,7 @@ func runBot(cmd *cobra.Command, args []string) error {
 	}
 
 	logger.Info("Bot exited cleanly")
+
 	return nil
 }
 
@@ -139,6 +142,7 @@ func runMigration(ctx context.Context, command string, args []string) error {
 	}
 
 	logger.Info("Migrations completed successfully")
+
 	return nil
 }
 
@@ -161,7 +165,7 @@ func initDB() *sqlx.DB {
 
 	db := sqlx.NewDb(sql.OpenDB(connector), dbDriverName)
 
-	if err := db.Ping(); err != nil {
+	if err := db.PingContext(context.Background()); err != nil {
 		logger.Fatal("failed verifying database connection", "error", err)
 	}
 

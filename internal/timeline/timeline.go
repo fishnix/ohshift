@@ -56,10 +56,12 @@ func NewManager(api *slack.Client) *Manager {
 func (m *Manager) resolveUsername(userID string) string {
 	// Check cache first
 	m.mu.RLock()
+
 	if username, exists := m.userCache[userID]; exists {
 		m.mu.RUnlock()
 		return username
 	}
+
 	m.mu.RUnlock()
 
 	// If not in cache, fetch from Slack API
@@ -72,6 +74,7 @@ func (m *Manager) resolveUsername(userID string) string {
 		m.mu.Lock()
 		m.userCache[userID] = userID
 		m.mu.Unlock()
+
 		return userID
 	}
 
@@ -180,11 +183,13 @@ func (m *Manager) AddEntry(incidentID string, entry Entry) error {
 			"entry_type", entry.Type,
 			"entry_id", entry.ID,
 			"user", entry.Username)
+
 		return fmt.Errorf("timeline not found for incident: %s", incidentID)
 	}
 
 	// Check for duplicate entry
 	timeline.mu.Lock()
+
 	for _, existingEntry := range timeline.Entries {
 		if existingEntry.ID == entry.ID {
 			timeline.mu.Unlock()
@@ -193,6 +198,7 @@ func (m *Manager) AddEntry(incidentID string, entry Entry) error {
 				"entry_id", entry.ID,
 				"entry_type", entry.Type,
 				"user", entry.Username)
+
 			return nil // Skip duplicate entry
 		}
 	}
@@ -563,6 +569,7 @@ func (m *Manager) HasEntry(incidentID, entryID string) bool {
 			return true
 		}
 	}
+
 	return false
 }
 
@@ -583,6 +590,7 @@ func (m *Manager) addReactionToMessage(channelID, messageTimestamp, reaction str
 			"channel_id", channelID,
 			"message_timestamp", messageTimestamp,
 			"reaction", reaction)
+
 		return err
 	}
 
@@ -590,5 +598,6 @@ func (m *Manager) addReactionToMessage(channelID, messageTimestamp, reaction str
 		"channel_id", channelID,
 		"message_timestamp", messageTimestamp,
 		"reaction", reaction)
+
 	return nil
 }

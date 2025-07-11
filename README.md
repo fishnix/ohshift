@@ -52,6 +52,7 @@ The bot is configured using environment variables:
 | `SLASH_COMMAND`         | Slash command to trigger the bot            | `/shift`   | No       |
 | `NOTIFICATIONS_CHANNEL` | Channel for incident notifications          | `general`    | No       |
 | `LOG_LEVEL`             | Logging level (debug, info, warn, error)    | `info`       | No       |
+| `ADD_ALL_MESSAGES_TO_TIMELINE` | Add all messages to timeline (false = only images/reactions) | `false` | No |
 
 ### Example Environment File
 
@@ -65,6 +66,7 @@ DB_URI=postgres://username:password@localhost:5432/ohshift?sslmode=disable
 SLASH_COMMAND=/shift
 NOTIFICATIONS_CHANNEL=incidents
 LOG_LEVEL=info
+ADD_ALL_MESSAGES_TO_TIMELINE=false
 ```
 
 ## Slack App Setup (with Socket Mode)
@@ -158,6 +160,18 @@ The bot automatically converts incident titles to Slack-compatible channel names
 - Replaces spaces and special characters with hyphens
 - Truncates to 64 characters (Slack limit)
 - Ensures names don't end with hyphens
+
+### Timeline Management
+
+The bot automatically maintains a timeline of important events in each incident channel. By default, only specific types of messages are added to the timeline:
+
+- **Images**: When someone shares an image file, it's automatically added to the timeline
+- **Highlighted Messages**: When someone reacts with :point_up: or :point_up_2: to a message, that message is added to the timeline
+- **All Messages**: If `ADD_ALL_MESSAGES_TO_TIMELINE=true` is set, all messages in incident channels are added to the timeline
+
+This selective approach helps keep the timeline focused on important information while preventing it from being cluttered with routine conversation.
+
+To view the timeline for an incident, use the `/shift timeline` command in any incident channel.
 
 ## Running the Bot
 
