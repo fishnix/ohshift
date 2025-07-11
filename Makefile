@@ -66,7 +66,7 @@ test-coverage: ## Run tests with coverage
 lint: ## Run golangci-lint
 	@echo "Running golangci-lint..."
 	@if command -v golangci-lint >/dev/null 2>&1; then \
-		golangci-lint run --timeout=5m; \
+		golangci-lint run --timeout=5m --out-format=colored-line-number; \
 	else \
 		echo "golangci-lint not found."; \
 		echo "Install with: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest"; \
